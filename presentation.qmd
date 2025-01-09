@@ -1,0 +1,435 @@
+---
+title: "Trabajo Práctico Nº 1"
+subtitle: "Laboratorio de datos 2023"
+format: html
+self-contained: true
+theme: cosmo
+fontsize: 1em
+linestretch: 1.15
+df-print: paged
+editor: visual
+---
+
+------------------------------------------------------------------------
+
+### **Integrantes del grupo:**
+
+-   Agustina Nerea Cueto, LU: 1604/21
+
+-   Ailen Violeta Bogao, LU: 25/21
+
+-   Juan Manuel Moreira Siri, LU: 592/20
+
+En el siguiente trabajo realizaremos un análisis sobre el uso del sistema Ecobici de la Ciudad de Buenos Aires y cómo se ve afectado por el clima. Propondremos ciertas hipótesis en base a nuestra intuición y veremos si los datos las confirman o las refutan.
+
+Para este análisis utilizaremos dos datasets, uno con el registro de usos del sistema Ecobici de CABA a lo largo de todo el año 2022 y el otro datos climáticos diarios del mismo año.
+
+Para ello usaremos las siguientes librerías:
+
+```{r}
+require(tidyverse)
+require(forcats)
+require(ggplot2)
+```
+
+```{r, echo=FALSE, output=FALSE}
+library(readr)
+bici_2022_reducido <- read_csv("trips_2022.csv")
+clima_original <- read_csv("clima.csv")
+```
+
+# **DATA SET**
+
+### Descripción de cada variable por dataset:
+
+## **Ecobici**
+
+-   **Id_recorrido**: Identificación alfanumerica de cada recorrido.
+-   **duracion_recorrido**: Es la duración del recorrido medida en segundos
+-   **fecha_origen_recorrido**: Fecha de cuando comienza el recorrido, incluye la hora exacta.
+-   **id_estacion_origen**: Cada estación esta identificada con un numero de ID. Esta variable corresponde al ID de la estación donde se inicia el recorrido.
+-   **nombre_estacion_origen**: Cada estación tiene un nombre. Esta variable corresponde al nombre de la estación donde se inicia el recorrido.
+-   **direccion_estacion_origen**: Es la dirección donde se encuentra la estación de origen. Se observa que no respeta un formato, es decir, hay valores que estan como altura + calle, altura + calle + interseccion de otra calle, calle + altura
+-   **long_estacion_origen**: Coordenada de longitud de la estacion de origen
+-   **lat_estacion_origen**: Coordenada de latitud de la estacion de origen
+-   **fecha_destino_recorrido**: Fecha de cuando finaliza el recorrido, incluye la hora exacta.
+-   **id_estacion_destino**: Cada estación esta identificada con un numero de ID. Esta variable corresponde al ID de la estación donde se finaliza el recorrido.
+-   **nombre_estacion_destino**: Cada estación tiene un nombre. Esta variable corresponde al nombre de la estación donde fianliza el recorrido.
+-   **direccion_estacion_destino**: Es la dirección donde se encuentra la estación de destino. Se observa que no respeta un formato, es decir, hay valores que estan como altura + calle, altura + calle + interseccion de otra calle, calle + altura.
+-   **long_estacion_destino**: coordenada de longitud de la estacion de destino
+-   **lat_estacion_destino**: coordenada de latitud de la estacion de destino
+-   **id_usuario**: número de identificación del usuario
+-   **modelo_bicicleta**
+-   **Género**: genero del usuario de la ecobici, es una variable categórica las opciones son MALE (Masculino), FEMALE (Femenino), OTHER (Otro)
+-   **fecha_destino_recorrido**: Fecha de cuando termina el recorrido, incluye hora exacta.
+
+Para el analisis del siguiente trabajo descartaremos la información de las siguientes variables:
+
+-   '**...1**', '**X**'
+-   **modelo_bicicleta**: No es relevante
+-   **id_estacion_origen**, **long_estacion_origen**, **lat_estacion_origen**, **nombre_estacion_origen**, **id_estacion_destino**, **long_estacion_destino**, **lat_estacion_destino**, **nombre_estacion_destino**: trabajaremos solo con la dirección de las estaciones.
+-   **fecha_origen_recorrido**, **fecha_destino_recorrido**: en su lugar usaremos solo fecha (no trabajaremos con la hora de los recorridos)
+
+Para ello hacemos:
+
+```{r}
+uso_bicis <- bici_2022_reducido %>%
+  mutate(fecha = as.Date(fecha_origen_recorrido)) %>%
+  select(-c(...1, X, id_estacion_origen, id_estacion_destino,
+            long_estacion_destino, lat_estacion_destino, long_estacion_origen,
+            lat_estacion_origen, modelo_bicicleta,
+            nombre_estacion_origen, nombre_estacion_destino,
+            fecha_origen_recorrido, fecha_destino_recorrido))
+```
+
+## **Clima**
+
+-   **date**: fecha en formato aaaa/mm/dd.
+-   **tavg**: temperatura promedio del aire en °C
+-   **tmin**: temperatura mínima del aire en °C
+-   **tmax**: temperatura máxima del aire en °C
+-   **prcp**: cantidad total de precipitación en mm.
+-   **snow**: máxima profundidad de nieve en mm.
+-   **wdir**: promedio de la dirección del viento en grados (°).
+-   **wspd**: promedio de la velocidad del viento en km/h.
+-   **wpgt**: la ráfaga de viento pico en km/h.
+-   **pres**: promedio de la presión atmosférica en hPa.
+-   **tsun**: la cantidad de tiempo de sol en minutos.
+
+Descartaremos la información de las siguientes variables:
+
+-   **snow**, **wpgt**, **tsun**: no hay infromación disponible para la región a analizar.
+
+-   **wdir**, **pres**: no trabajaremos con esta información.
+
+Para ello hacemos:
+
+```{r}
+df_clima <- clima_original %>% select(-c(snow, wpgt, tsun, wdir, pres))
+```
+
+### **Presentaremos ahora las hipótesis que queremos confirmar con los datos:**
+
+-   Los días de lluvia las bicicletas se usan un 70% menos que los días que no llueve.
+
+-   Los días que más se usan las bicicletas son cuando la temperatura está entre 20 y 30 grados.
+
+-   Los dias de semana hay un aumento en el uso de las bicicletas.
+
+-   Los fines de semana aumenta la duración de los viajes.
+
+Veamos primero como son los datasets.
+
+## **Ecobici**
+
+Primero filtramos los viajes para quedarnos con los que duran entre 5 y 60 minutos. Y convertimos `duracion_recorrido` a minutos por comodidad.
+
+```{r}
+uso_bicis <- uso_bicis %>% 
+  drop_na() %>%
+  filter(duracion_recorrido >= 300 & duracion_recorrido <= 3600)
+uso_bicis <- uso_bicis %>% mutate(duracion_recorrido = duracion_recorrido/60)
+```
+
+También agregaremos las columnas `Dia_semana` y `mes` por comodidad:
+
+```{r}
+uso_bicis = uso_bicis %>%
+  mutate(Dia_semana = weekdays(fecha, abbreviate = FALSE), mes = months(fecha, abbreviate = TRUE))
+```
+
+------------------------------------------------------------------------
+
+Veamos ahora, por ejemplo, el uso de las bicicletas por género:
+
+```{r}
+table(uso_bicis$Género) %>% prop.table()
+```
+
+```{r}
+ggplot(uso_bicis, aes(x = Género)) + 
+  geom_bar(fill = "#EE6363") + 
+  labs(title = "Cantidad de viajes por Género") + 
+  xlab("Género") + ylab("Cantidad de viajes") + theme_bw()
+```
+
+Podemos ver que las bicis son más usadas por hombres.
+
+------------------------------------------------------------------------
+
+Hagámos un análisis con respecto a qué día se usan más las bicis. Por ejemplo, ¿Qué día del año se registraron más viajes?
+
+```{r}
+incidencias = uso_bicis %>%
+  group_by(fecha) %>%
+  summarise(cantidad = n())
+
+fecha_pico_bicis <- incidencias$fecha[which.max(incidencias$cantidad)]
+weekdays(fecha_pico_bicis)
+fecha_pico_bicis
+```
+
+Observamos que el día que más se usaron las bicis fue un día de semana, no feriado.
+
+Veamos entonces la distribución de uso por día de semana:
+
+```{r}
+usos_dia_semana <- uso_bicis %>%
+  group_by(Dia_semana)%>%
+  summarise(cantidad_usos = n())
+```
+
+```{r}
+semana <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+usos_dia_semana %>%
+  mutate(Dia_semana = fct_relevel(Dia_semana, semana)) %>%
+  ggplot(aes(x = Dia_semana, y = cantidad_usos, fill = Dia_semana)) + 
+  geom_bar(stat = "identity") +
+  labs(x = "Día de la semana", y = "Cantidad de usos")+
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+Observamos que la diferencia del uso entre días de semana y fines de semana es bastante grande. Intuímos que el sistema es más usado por los usuarios para ir al trabajo o a la facultad, que para dar un paseo. Acá también confirmamos la hipótesis de que las bicis se usan más los días de semana.
+
+------------------------------------------------------------------------
+
+Veamos como varía el uso por mes:
+
+```{r}
+usos_mes <- uso_bicis %>%
+  group_by(mes)%>%
+  summarise(cantidad_usos = n())
+```
+
+```{r}
+meses <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+usos_mes %>%
+  mutate(mes = fct_relevel(mes, meses)) %>%
+  ggplot(aes(x = mes, y = cantidad_usos, fill = mes)) + 
+  geom_bar(stat = "identity") +
+  labs(title = "Cantidad de usos por mes", x = "Mes", y = NULL) +
+  theme_bw()+
+  theme(legend.position = "none")
+```
+
+Podemos observar que los meses que menos se usan las bicicletas son en los que generalmente hace más frío y más calor.
+
+------------------------------------------------------------------------
+
+Analicemos ahora cómo es la duración de los recorridos.
+
+```{r}
+uso_bicis %>%
+  drop_na() %>%
+  summarise(promedio_duracion = mean(duracion_recorrido),
+            mediana = median(duracion_recorrido),
+            desviacion = sd(duracion_recorrido))
+```
+
+```{r}
+promedio_duracion <- mean(uso_bicis$duracion_recorrido)
+mediana_duracion <- median(uso_bicis$duracion_recorrido)
+
+uso_bicis %>% drop_na() %>%
+  ggplot(aes(duracion_recorrido) ) + geom_density(fill = 'lightblue', color = 'lightblue') +
+  geom_vline(xintercept = promedio_duracion,               #promedio
+             linetype = 'dashed', color = 'red') +
+  annotate("text", x=promedio_duracion-1.3, y=0.015, label="Promedio", angle=90, size=3) +
+  geom_vline(xintercept = mediana_duracion,                #mediana
+             linetype = 'dashed', color = 'darkorange') +
+  annotate("text", x=mediana_duracion-1.3, y=0.015, label="Mediana", angle=90, size=3) +
+  labs(title = "Densidad de la duración de los viajes", x = "minutos", y = NULL) +
+  theme_light()
+```
+
+Vemos que el promedio de duracion de los viajes ronda los 18 minutos, y los viajes que mas se repiten rondan los 10 minutos.
+
+¿Tendrá algo que ver si es día de semana con la duración de los viajes?
+
+Agregamos la columna `es_finde` por comodidad:
+
+```{r}
+uso_bicis <- uso_bicis %>%
+  mutate(es_finde = ifelse(Dia_semana %in% c("Saturday", "Sunday"), "Si", "No"))
+```
+
+```{r}
+uso_bicis %>%
+  group_by(es_finde) %>%
+  summarise(prom_duracion = mean(duracion_recorrido))
+```
+
+Observamos que cuando es fin de semana el promedio de la duracion de los viajes es de 25 minutos, mientras que para los días de semana es de casi 18 minutos. Esto confirma la hipótesis de que los viajes en fin de semana suelen ser mas largos en promedio.
+
+------------------------------------------------------------------------
+
+Podríamos preguntarnos cuales son los viajes que más se realizaron. Busquemos el Top 5:
+
+```{r}
+df_origen_destino_desc =  uso_bicis %>%
+  select(direccion_estacion_origen,direccion_estacion_destino) %>%
+                    group_by_all() %>% 
+                    count %>% 
+                    filter(n > 7) %>% 
+                    arrange(desc(n))
+
+top_viajes = head(df_origen_destino_desc,5)
+
+#fusionamos las columnas origen y destino
+top_viajes <- mutate(top_viajes, viajes = paste(direccion_estacion_origen,direccion_estacion_destino, sep="\n"))
+```
+
+```{r}
+ggplot(top_viajes, aes(x = n, y = reorder(viajes,n), fill = viajes)) + 
+  geom_col() + labs(title="Top 5 viajes más populares") + xlab("Cantidad de viajes") + ylab(NULL)+  theme_bw() + theme(legend.position = "none") 
+```
+
+Miremos ahora cómo son sus duraciones:
+
+```{r}
+uso_bicis %>%
+  inner_join(top_viajes, by = c("direccion_estacion_origen", "direccion_estacion_destino")) %>%
+  ggplot(aes(x=duracion_recorrido, color = direccion_estacion_origen)) +
+  geom_density() +
+  labs(title = "Duración del Top 5 viajes", y=NULL, x="Minutos") + theme_bw() +
+  theme(legend.position = "none")
+```
+
+Observemos que los recorridos mas uniformes (los que varían más) empiezan y terminan en la misma estación, mientras que los que van de una estación a otra, tienen picos al rededor de una duración, se intuye que es el tiempo en promedio que se tarda en ir de una estacion a otra.
+
+# Clima
+
+------------------------------------------------------------------------
+
+Primero agreguemos las columnas `dia_semana` y `mes` por comodidad y renombramos `date` como `fecha` para que coincida con el dataset del uso de bicis:
+
+```{r}
+df_clima <- df_clima %>%
+         drop_na() %>%
+         mutate(dia_semana = weekdays(date, abbreviate = TRUE),
+                mes = months(date, abbreviate = TRUE))
+df_clima <- rename(df_clima, fecha = date)
+```
+
+Veamos un resumen de la temperatura promedio y las lluvias totales por mes:
+
+```{r}
+resumen_mensual <- df_clima %>%
+  group_by(mes) %>%
+  summarise(temp_prom = mean(tavg, na.rm=TRUE), lluvias_total  = sum(prcp, na.rm=TRUE),
+            tmin_prom = mean(tmin, na.rm=TRUE), tmax_prom = mean(tmax, na.rm=TRUE))
+```
+
+```{r}
+resumen_mensual %>%
+  mutate(mes = fct_relevel(mes, meses)) %>%
+  gather(key = "variable", value = "valor", tmin_prom, tmax_prom) %>%
+  mutate(variable = factor(variable, levels = c("tmin_prom", "tmax_prom"))) %>%
+
+  ggplot(aes(x = mes, y = valor, fill = variable)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  labs(title = "Temperatura promedio, mínima y máxima por mes", y = "ºC", x = "Mes") +
+  scale_fill_manual(values = c("lightblue", "lightgreen"),
+                    name = NULL, labels = c("Temp. Mínima", "Temp. Máxima")) +
+  geom_line(aes(y = temp_prom, color = "Temp. Promedio"), group = 1) +
+  geom_point(aes(y = temp_prom, color = "Temp. Promedio"), size = 2) +
+  scale_color_manual(values = "coral1", name = NULL, labels = "Temp. Promedio") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(override.aes = list(shape = NA)))
+
+```
+
+Podemos observar que la amplitud térmica es pareja para todo el año, independientemente de la disminución que sufre la temperatura en epoca invernal.
+
+```{r}
+precipitacion_mensual = resumen_mensual %>%
+  mutate(mes = fct_relevel(mes, meses)) %>%
+  ggplot(aes(mes, lluvias_total)) + geom_line(group = 1, color = 'coral1') + geom_point(color = 'coral3') +
+  labs(title = "Precipitación total por mes", y = "Precipitación (mm)", x = "Mes") +
+  theme_bw()
+
+precipitacion_mensual
+```
+
+Febrero resulta ser el mes más lluvioso. Si bien es uno de los meses más calurosos no es el que registra las temperaturas más altas. Respecto de estos ultimos dos gráficos, podemos concluir que la temperatura y la cantidad de precipitaciones no estan directamente relacionadas. Si bien las lluvias descienden en Junio, mes donde se registra la temperatura más baja, tanto en Diciembre como en Enero (que presentan un nivel de precipitaciones similar) son considerablemente menores que en Febrero y registran temperaturas mayores.
+
+Veamos ahora qué podemos decir con la información de ambos dataset, para ello combinemoslos en un solo dataset:
+
+```{r}
+df_bici_clima <- uso_bicis %>% drop_na() %>%
+  merge(df_clima, by='fecha', all.x=TRUE) %>%
+  mutate(mes = mes.x) %>%
+  select(-c(mes.x, mes.y))
+```
+
+Veamos primero como afecta el uso de las bicis si llueve o no en un día en particular:
+
+```{r}
+usos_dias_lluviosos <- df_bici_clima %>%
+  drop_na() %>%
+  mutate(llovio = ifelse(prcp == 0, "No llovió", "Llovió")) %>%
+  group_by(llovio) %>%
+  summarise(cantidad_usos = n())
+
+usos_dias_lluviosos
+```
+
+Esto nos divide la cantidad de usos en los días que llueve y en los que no. Pero esto depende de la cantidad de días que llovió en el año, por lo que vamos a dividir la cantidad de usos de las bicis entre la cantidad de días:
+
+```{r}
+dias_lluviosos <- df_clima %>%
+  drop_na() %>%
+  mutate(llovio = ifelse(prcp == 0, "No llovió", "Llovió")) %>%
+  group_by(llovio) %>%
+  summarise(cantidad_dias_llovio = n())
+
+dias_lluviosos
+```
+
+Vemos que en 2022 llovió 97 días mientras que no lo hizo en 266 días. Si dividimos el total de los viajes entre 365 días obtenemos el promedio de viajes por día, que es:
+
+```{r}
+dim(uso_bicis)[1] / 365
+```
+
+Haciendo lo mismo para la cantidad de días que llovió y que no obtendremos el promedio de viajes en los días de lluvia y de no lluvia, la ventaja de esto es que no depende de la proporción de días de lluvia durante el año:
+
+```{r}
+#promedio para días lluviosos
+usos_dias_lluviosos$cantidad_usos[1] / dias_lluviosos$cantidad_dias_llovio[1]
+```
+
+```{r}
+#promedio para días que no llovió
+usos_dias_lluviosos$cantidad_usos[2] / dias_lluviosos$cantidad_dias_llovio[2]
+```
+
+Vemos que es mayor el uso de bicicletas en los días que no llueve, pero no está ni cerca del 70% como asumimos en nuestra hipótesis.
+
+Ahora analizaremos cómo influye la temperatura en el uso de bicis, vamos a tener en cuenta solo los días que no llovió para aislar el análisis solo a la temperatura
+
+```{r}
+# filtrar por dias que no llueve
+
+df_bici_clima %>%
+  filter(prcp == 0) %>%
+  group_by(tavg) %>%
+  summarise(cantidad_usos = n()) %>%
+  ggplot(aes(x = tavg)) +
+  geom_density(color = 'skyblue', fill = "lightblue") +
+  labs(title = "Distribución de usos por temperatura", 
+       x = "°C", y = NULL) +
+  theme_bw()
+```
+
+Vemos que nuestra hipótesis sobre la temperatura está algo errada en cuanto a la amplitud térmica que especificamos, es decir, podemos observar en el gráfico que si bien las bicis se usan más cuando la temperatura ronda los 20 grados, se puede decir lo mismo a los 15 grados. Sin embargo sí se observa una disminución del uso cuando las temperaturas están por debajo de los 10 grados y cuando superan los 25.
+
+
+# **CONCLUSIONES FINALES**
+
+A lo largo de este trabajo hemos intentado confirmar nuestras hipótesis sobre cómo afecta el clima en el uso del servicio Ecobici. Hemos visto que si bien algunas de las hipótesis estaban bien encaminadas, los datos demostraron que los números no eran no eran como pensábamos, como por ejemplo el efecto de las lluvias: si bien parece intuitivo pensar que las bicis son menos utilizadas los dias que llueve, la diferencia no era tan grande como pensábamos. Lo mismo para la hipótesis de la temperatura.
+
+En cuanto a las hipótesis de los días de semana éstas fueron confirmadas por los datos, pero vale aclarar que no intentamos anticipar ninguna cifra, como en las anteriores.
+
